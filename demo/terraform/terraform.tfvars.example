@@ -1,0 +1,27 @@
+# Copy this file to terraform.tfvars and fill in the values.
+# Do NOT commit terraform.tfvars to source control (it contains secrets).
+#
+# IMPORTANT: Apply terraform/ (the main telemetry pipeline) BEFORE this.
+# The apim_logger_name here must match the logger created by terraform/.
+
+resource_group_name      = "<your-resource-group>"
+location                 = "westeurope"
+location_abbreviation    = "weu"   # Must match location — used in all resource names
+environment              = "dev"
+
+# Pre-existing APIM instance
+apim_name                = "<your-apim-instance-name>"
+apim_resource_group_name = "<resource-group-containing-apim>"
+
+# Must match the apim_logger_name output from terraform/
+apim_logger_name         = "apim-eventhub-logger"
+
+# Docker image for the mock backend.
+# Build and push demo/backend/ to a container registry, then set the image here:
+#   docker build -t <registry>/mock-backend:latest demo/backend
+#   docker push <registry>/mock-backend:latest
+mock_backend_image       = "<your-registry>/mock-backend:latest"
+
+# Sensitive — inject via env var instead of committing:
+# export TF_VAR_new_relic_license_key="YOUR_40_CHAR_LICENSE_KEY"
+new_relic_license_key    = "REPLACE_ME"

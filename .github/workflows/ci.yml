@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  validate:
+    name: Validate (no Azure credentials required)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── OTel Collector config ─────────────────────────────────────────────
+      - name: Validate otel-collector-config.yaml
+        run: |
+          chmod +x tests/collector/validate.sh
+          tests/collector/validate.sh
+
+      # ── APIM policy ───────────────────────────────────────────────────────
+      - name: Validate apim-policy.xml.tpl
+        run: |
+          chmod +x tests/policy/validate.sh
+          tests/policy/validate.sh
+
+      # ── Terraform ─────────────────────────────────────────────────────────
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Validate terraform/
+        run: |
+          chmod +x tests/terraform/validate.sh
+          tests/terraform/validate.sh terraform
+
+      - name: Validate demo/terraform/
+        run: |
+          tests/terraform/validate.sh demo/terraform
+
+      # ── Bicep ─────────────────────────────────────────────────────────────
+      - name: Install Bicep CLI
+        run: |
+          curl -Lo /usr/local/bin/bicep \
+            https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x /usr/local/bin/bicep
+
+      - name: Validate Bicep files
+        run: |
+          chmod +x tests/bicep/validate.sh
+          tests/bicep/validate.sh

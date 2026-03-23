@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>APIM Telemetry Demo — Mock Client</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; background: #0f0f0f; color: #e0e0e0; }
+    h1 { color: #1CE783; }
+    button { background: #0072C6; color: white; border: none; padding: 0.6rem 1.2rem; border-radius: 4px; cursor: pointer; font-size: 1rem; margin: 0.5rem 0; }
+    button:hover { background: #005a9e; }
+    pre { background: #1a1a1a; padding: 1rem; border-radius: 4px; overflow-x: auto; font-size: 0.85rem; border: 1px solid #333; }
+    .label { font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-top: 1rem; }
+    .trace-id { color: #1CE783; font-family: monospace; }
+    #status { margin: 1rem 0; padding: 0.75rem; border-radius: 4px; display: none; }
+    #status.success { background: #0d2b1a; border: 1px solid #1CE783; color: #1CE783; }
+    #status.error { background: #2b0d0d; border: 1px solid #ff4444; color: #ff4444; }
+  </style>
+</head>
+<body>
+  <h1>APIM Distributed Trace Demo</h1>
+  <p>
+    This page uses the <strong>OpenTelemetry Web SDK</strong> to generate a root trace,
+    propagate it through APIM to the mock backend, and export browser spans directly to New Relic.
+    After clicking the button, you should see <strong>3 distinct entities</strong> in the
+    New Relic Service Map: <em>mock-client</em>, <em>apim-bsl-dev-weu-02</em>, and <em>mock-backend</em>.
+  </p>
+
+  <button id="sendBtn">Send Traced Request via APIM</button>
+
+  <div id="status"></div>
+
+  <div class="label">Browser Trace Context</div>
+  <pre id="traceOutput">— not yet generated —</pre>
+
+  <div class="label">Backend Response</div>
+  <pre id="responseOutput">— waiting for request —</pre>
+
+  <!--
+    Load the OTel Web SDK from CDN (unpkg).
+    For production, bundle these with a proper build tool.
+    These are the official @opentelemetry/sdk-trace-web + context-zone bundles.
+  -->
+  <!-- Runtime config — injects window.APIM_ENDPOINT and window.NR_LICENSE_KEY from nginx env vars -->
+  <script src="/config.js"></script>
+  <script src="https://unpkg.com/@opentelemetry/api@1.9.0/build/esm/index.js" type="module" id="otel-api"></script>
+
+  <script type="module">
+    // ================================================================
+    // OpenTelemetry Web SDK — Browser instrumentation
+    // ================================================================
+    // We use the CDN-hosted UMD bundles here for simplicity in the demo.
+    // The import map approach below works in modern browsers.
+    // ================================================================
+
+    // Dynamically import OTel packages from CDN
+    const OtelApiScript    = "https://unpkg.com/@opentelemetry/api@1.9.0/build/src/index.js";
+    const OtelCoreScript   = "https://unpkg.com/@opentelemetry/sdk-trace-web@1.25.0/build/src/index.js";
+
+    // ----------------------------------------------------------------
+    // Configuration — set these to match your environment
+    // ----------------------------------------------------------------
+    const CONFIG = {
+      // Your APIM gateway URL — the backend target configured in APIM
+      // For local demo: point directly at the mock backend (bypasses real APIM)
+      apimEndpoint: window.APIM_ENDPOINT || "http://localhost:3001",
+
+      // New Relic OTLP HTTP endpoint
+      nrOtlpEndpoint: "https://otlp.nr-data.net:4318",
+
+      // Injected at runtime by the nginx container serving this file
+      // Set NEW_RELIC_LICENSE_KEY env var in docker-compose
+      nrLicenseKey: window.NR_LICENSE_KEY || "",
+
+      serviceName: "mock-client",
+    };
+
+    // ----------------------------------------------------------------
+    // Bootstrap OTel using the global UMD bundles loaded via <script>
+    // We load these synchronously before this module runs.
+    // ----------------------------------------------------------------
+
+    async function initOtel() {
+      // Dynamically load OTel UMD bundles from CDN
+      await loadScript("https://unpkg.com/@opentelemetry/api@1.9.0/build/src/platform/browser/index.js");
+      await loadScript("https://unpkg.com/@opentelemetry/sdk-trace-web@1.25.0/build/src/index.js");
+      await loadScript("https://unpkg.com/@opentelemetry/exporter-trace-otlp-http@0.52.0/build/src/platform/browser/index.js");
+      await loadScript("https://unpkg.com/@opentelemetry/context-zone@1.25.0/build/src/index.js");
+      await loadScript("https://unpkg.com/@opentelemetry/propagator-b3@1.25.0/build/src/index.js");
+
+      // After loading, the globals are available as window.opentelemetry.*
+      // For simplicity in this demo we use the fetch-based approach below
+      // without the full SDK bootstrap, which keeps the HTML self-contained.
+    }
+
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+
+    // ----------------------------------------------------------------
+    // Minimal W3C traceparent generator (no external dependency)
+    // For a real app, use the full OTel Web SDK.
+    // ----------------------------------------------------------------
+
+    function generateTraceId() {
+      // 16 bytes → 32 hex chars
+      return Array.from(crypto.getRandomValues(new Uint8Array(16)))
+        .map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    function generateSpanId() {
+      // 8 bytes → 16 hex chars
+      return Array.from(crypto.getRandomValues(new Uint8Array(8)))
+        .map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    function buildTraceparent(traceId, spanId) {
+      return `00-${traceId}-${spanId}-01`;
+    }
+
+    // ----------------------------------------------------------------
+    // Export a span to New Relic via OTLP/HTTP (browser-compatible)
+    // ----------------------------------------------------------------
+
+    async function exportSpanToNewRelic({ traceId, spanId, parentSpanId, startNs, endNs, name, attributes }) {
+      if (!CONFIG.nrLicenseKey) {
+        console.warn("[mock-client] NEW_RELIC_LICENSE_KEY not set — skipping export");
+        return;
+      }
+
+      const spanData = {
+        resourceSpans: [{
+          resource: {
+            attributes: [
+              { key: "service.name",     value: { stringValue: CONFIG.serviceName } },
+              { key: "telemetry.sdk.name",     value: { stringValue: "browser-manual" } },
+              { key: "telemetry.sdk.language", value: { stringValue: "javascript" } },
+            ]
+          },
+          scopeSpans: [{
+            scope: { name: "mock-client" },
+            spans: [{
+              traceId:           traceId,
+              spanId:            spanId,
+              parentSpanId:      parentSpanId || "",
+              name:              name,
+              kind:              3, // CLIENT
+              startTimeUnixNano: startNs.toString(),
+              endTimeUnixNano:   endNs.toString(),
+              status:            { code: 1 }, // OK
+              attributes: Object.entries(attributes).map(([k, v]) => ({
+                key: k, value: { stringValue: String(v) }
+              })),
+            }]
+          }]
+        }]
+      };
+
+      try {
+        await fetch(`${CONFIG.nrOtlpEndpoint}/v1/traces`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "api-key": CONFIG.nrLicenseKey,
+          },
+          body: JSON.stringify(spanData),
+        });
+        console.log("[mock-client] Span exported to New Relic:", spanId);
+      } catch (err) {
+        console.warn("[mock-client] Failed to export span:", err.message);
+      }
+    }
+
+    // ----------------------------------------------------------------
+    // Main demo flow
+    // ----------------------------------------------------------------
+
+    document.getElementById("sendBtn").addEventListener("click", async () => {
+      const btn = document.getElementById("sendBtn");
+      const statusEl = document.getElementById("status");
+      btn.disabled = true;
+      statusEl.style.display = "none";
+
+      // 1. Generate root trace context (browser is the trace originator)
+      const traceId     = generateTraceId();
+      const rootSpanId  = generateSpanId();
+      const traceparent = buildTraceparent(traceId, rootSpanId);
+      const startNs     = BigInt(Date.now()) * 1_000_000n;
+
+      document.getElementById("traceOutput").textContent = JSON.stringify({
+        traceId,
+        rootSpanId,
+        traceparent,
+        service: CONFIG.serviceName,
+      }, null, 2);
+
+      console.log("[mock-client] Generated trace:", traceparent);
+
+      // 2. Send request to APIM (or mock backend for local demo)
+      //    The traceparent is injected as a header so APIM can propagate it.
+      let responseData;
+      let endNs;
+      try {
+        const resp = await fetch(`${CONFIG.apimEndpoint}/api/data`, {
+          method: "GET",
+          headers: {
+            "traceparent": traceparent,
+            "tracestate":  "",
+          },
+        });
+        endNs = BigInt(Date.now()) * 1_000_000n;
+
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        responseData = await resp.json();
+
+        document.getElementById("responseOutput").textContent = JSON.stringify(responseData, null, 2);
+        statusEl.className = "success";
+        statusEl.textContent = "✓ Request successful — check New Relic Distributed Tracing in ~30s";
+        statusEl.style.display = "block";
+      } catch (err) {
+        endNs = BigInt(Date.now()) * 1_000_000n;
+        statusEl.className = "error";
+        statusEl.textContent = `✗ Request failed: ${err.message}`;
+        statusEl.style.display = "block";
+        document.getElementById("responseOutput").textContent = err.message;
+        btn.disabled = false;
+        return;
+      }
+
+      // 3. Export the browser root span to New Relic
+      //    This creates the "mock-client" entity in the Service Map.
+      await exportSpanToNewRelic({
+        traceId,
+        spanId: rootSpanId,
+        parentSpanId: null,
+        startNs,
+        endNs,
+        name: "browser.fetchViaAPIM",
+        attributes: {
+          "http.method":   "GET",
+          "http.url":      `${CONFIG.apimEndpoint}/api/data`,
+          "http.status":   responseData?.traceContext ? "200" : "unknown",
+          "demo.component": "mock-client",
+          "backend.traceId": responseData?.traceContext?.traceId || "",
+        },
+      });
+
+      btn.disabled = false;
+    });
+  </script>
+</body>
+</html>

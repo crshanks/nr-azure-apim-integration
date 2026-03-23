@@ -1,0 +1,31 @@
+// Copy this file to main.bicepparam and fill in the values.
+// Do NOT commit main.bicepparam to source control (it contains secrets).
+//
+// IMPORTANT: Deploy bicep/main.bicep BEFORE this.
+// apimLoggerName must match the apimLoggerName parameter used there.
+//
+// Deploy with:
+//   az deployment group create \
+//     --resource-group <your-resource-group> \
+//     --template-file demo/bicep/main.bicep \
+//     --parameters demo/bicep/main.bicepparam
+
+using './main.bicep'
+
+param resourceGroupName     = '<your-resource-group>'
+param location              = 'westeurope'
+param locationAbbreviation  = 'weu'
+param environment           = 'dev'
+
+param apimName              = '<your-apim-instance-name>'
+param apimResourceGroupName = '<resource-group-containing-apim>'
+param apimLoggerName        = 'apim-eventhub-logger'
+
+// Build and push demo/backend/ to a registry first:
+//   docker build --platform linux/amd64 -t <registry>/mock-backend:latest demo/backend
+//   docker push <registry>/mock-backend:latest
+param mockBackendImage      = '<your-registry>/mock-backend:latest'
+
+// Inject the license key via environment variable rather than committing it:
+//   export NEW_RELIC_LICENSE_KEY="your_40_char_key"
+param newRelicLicenseKey    = readEnvironmentVariable('NEW_RELIC_LICENSE_KEY')

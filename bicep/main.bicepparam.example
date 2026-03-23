@@ -1,0 +1,33 @@
+// Copy this file to main.bicepparam and fill in the values.
+// Do NOT commit main.bicepparam to source control (it contains secrets).
+//
+// Deploy with:
+//   az deployment group create \
+//     --resource-group <your-resource-group> \
+//     --template-file bicep/main.bicep \
+//     --parameters bicep/main.bicepparam
+
+using './main.bicep'
+
+param resourceGroupName        = '<your-resource-group>'
+param location                 = 'westeurope'
+param locationAbbreviation     = 'weu'
+param environment              = 'dev'
+
+param apimName                 = '<your-apim-instance-name>'
+param apimResourceGroupName    = '<resource-group-containing-apim>'
+param apimLoggerName           = 'apim-eventhub-logger'
+
+// Inject the license key via environment variable rather than committing it:
+//   export NEW_RELIC_LICENSE_KEY="your_40_char_key"
+param newRelicLicenseKey       = readEnvironmentVariable('NEW_RELIC_LICENSE_KEY')
+
+// Optional overrides — remove to use auto-generated names:
+// param eventhubNamespaceNameOverride     = 'evhns-apim-telemetry-dev-weu'
+// param logAnalyticsWorkspaceNameOverride = 'law-apim-telemetry-dev-weu'
+// param containerGroupNameOverride        = 'aci-otel-collector-dev-weu'
+// param storageAccountNameOverride        = 'stotelchkdevweu'   // override if org policy enforces a naming prefix (e.g. 'ststd')
+
+// Optional production sizing overrides:
+// param otelCollectorCpu      = '0.5'   // increase for higher throughput
+// param otelCollectorMemoryGb = '1.0'

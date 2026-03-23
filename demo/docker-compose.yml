@@ -1,0 +1,69 @@
+version: "3.9"
+
+# ================================================================
+# APIM Telemetry Demo — Local docker-compose
+#
+# Services:
+#   mock-client   : Browser HTML app (port 8080) — OTel Web SDK
+#   mock-backend  : Node.js Express API (port 3001) — OTel Node SDK
+#
+# IMPORTANT: Set your New Relic license key before running:
+#   export NEW_RELIC_LICENSE_KEY=your_40_char_key
+#   docker-compose up --build
+#
+# For demos with a REAL APIM instance:
+#   export APIM_ENDPOINT=https://<your-apim-instance>.azure-api.net/demo
+#   (The mock backend is still needed as the APIM backend target)
+#
+# For fully local demos (no APIM):
+#   Leave APIM_ENDPOINT unset — the client calls mock-backend directly.
+#   This proves the OTel instrumentation works but bypasses APIM.
+# ================================================================
+
+services:
+  mock-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mock-backend
+    ports:
+      - "3001:3001"
+    environment:
+      # New Relic ingest key — inject from host env
+      NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY}"
+      # Service name that appears in New Relic Service Map
+      OTEL_SERVICE_NAME: "mock-backend"
+      # OTLP HTTP endpoint for New Relic
+      OTEL_EXPORTER_OTLP_ENDPOINT: "https://otlp.nr-data.net:4318"
+      PORT: "3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - demo-net
+
+  mock-client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: mock-client
+    ports:
+      - "8081:8080"
+    environment:
+      # Point the browser at APIM (real) or mock-backend (local demo)
+      # When using real APIM, the browser talks to APIM which forwards to mock-backend
+      # When no APIM_ENDPOINT is set, falls back to http://localhost:3001 (client-side)
+      APIM_ENDPOINT: "${APIM_ENDPOINT:-http://localhost:3001}"
+      # Injected into the browser's window.NR_LICENSE_KEY via nginx config
+      NR_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY}"
+    depends_on:
+      mock-backend:
+        condition: service_healthy
+    networks:
+      - demo-net
+
+networks:
+  demo-net:
+    driver: bridge

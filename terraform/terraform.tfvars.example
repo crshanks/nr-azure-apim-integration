@@ -1,0 +1,30 @@
+# Copy this file to terraform.tfvars and fill in the values.
+# Do NOT commit terraform.tfvars to source control (it contains secrets).
+
+resource_group_name      = "<your-resource-group>"
+location                 = "westeurope"
+location_abbreviation    = "weu"   # Must match location — used in all resource names
+environment              = "dev"
+
+# Pre-existing APIM instance (not managed by this Terraform)
+apim_name                = "<your-apim-instance-name>"
+apim_resource_group_name = "<resource-group-containing-apim>"
+
+# Resource names are auto-generated from location_abbreviation + environment.
+# Override here only if you need a custom name:
+# eventhub_namespace_name      = "evhns-apim-telemetry-dev-weu"
+# log_analytics_workspace_name = "law-apim-telemetry-dev-weu"
+# container_group_name         = "aci-otel-collector-dev-weu"
+# storage_account_name         = "stotelchkdevweu"   # override if org policy enforces a naming prefix (e.g. "ststd")
+
+apim_logger_name         = "apim-eventhub-logger"
+
+# Sensitive — inject via env var instead of committing:
+# export TF_VAR_new_relic_license_key="YOUR_40_CHAR_LICENSE_KEY"
+new_relic_license_key    = "REPLACE_ME"
+
+# Production sizing — defaults are suitable for dev/test.
+# Increase for higher throughput environments:
+# otel_collector_cpu       = 0.5   # cores
+# otel_collector_memory_gb = 1.0   # GB
+# eventhub_partition_count = 2     # cannot be decreased after creation

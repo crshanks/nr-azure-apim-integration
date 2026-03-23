@@ -1,0 +1,92 @@
+# OpenTelemetry Collector Configuration
+# Deployed in Azure Container Instances (ACI)
+#
+# Pipeline:
+#   azure_event_hub receiver (traces) → otlp_http exporter (New Relic)
+#
+# The azure_event_hub receiver uses format: "azure". The APIM policy wraps the
+# payload in {"records":[...]} using Azure Application Insights AppRequests field
+# names. The receiver maps these directly to OTel span fields:
+#
+#   OperationId  → trace.id
+#   Id           → span.id
+#   ParentId     → span.parentSpanId
+#   Name         → span.name
+#   AppRoleName  → service.name (resource attribute)
+#   DurationMs   → end_time = start_time + DurationMs
+#   ResultCode   → http.response.status_code (attribute)
+#   Url          → http.url (attribute)
+#   Properties["HTTP Method"] → http.method (attribute)
+#
+# Environment variables required:
+#   NEW_RELIC_LICENSE_KEY     : New Relic ingest license key (40 chars)
+#   AZURE_EVENTHUB_CONNECTION : SAS connection string with EntityPath
+
+receivers:
+  azure_event_hub:
+    connection: "${env:AZURE_EVENTHUB_CONNECTION}"
+    format: "azure"
+    storage: file_storage
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  batch:
+    send_batch_size: 1000
+    timeout: 10s
+
+exporters:
+  # debug exporter — uncomment for local troubleshooting, do not enable in production
+  # debug:
+  #   verbosity: detailed
+
+  otlp_http/newrelic:
+    endpoint: "https://otlp.nr-data.net:4318"
+    headers:
+      api-key: "${env:NEW_RELIC_LICENSE_KEY}"
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 1000
+
+extensions:
+  health_check:
+    endpoint: "0.0.0.0:13133"
+  file_storage:
+    directory: /var/lib/otelcol/checkpoints
+    create_directory: true
+
+service:
+  extensions: [health_check, file_storage]
+  pipelines:
+    traces:
+      receivers:  [azure_event_hub]
+      processors: [memory_limiter, batch]
+      exporters:  [otlp_http/newrelic]
+  telemetry:
+    logs:
+      level: "info"
+    # Collector internal metrics exported directly to New Relic.
+    # These appear as otelcol_* metrics in New Relic and cover queue depth,
+    # spans accepted/refused, exporter success/failure, and memory usage.
+    # Container logs (stdout) are captured separately by the Log Analytics
+    # diagnostic setting, providing a safety net if the collector itself is down.
+    metrics:
+      readers:
+        - periodic:
+            interval: 60000  # ms — emit every 60 seconds
+            exporter:
+              otlp:
+                protocol: http/protobuf
+                endpoint: "https://otlp.nr-data.net:4318"
+                headers:
+                  api-key: "${env:NEW_RELIC_LICENSE_KEY}"

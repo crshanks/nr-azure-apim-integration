@@ -1,0 +1,178 @@
+<!--
+  APIM Policy Template — rendered by demo/terraform/main.tf
+  Variables injected by Terraform:
+    logger_id  : name of the azurerm_api_management_logger (e.g. apim-eventhub-logger)
+    backend_id : name of the azurerm_api_management_backend (e.g. mock-backend)
+
+  Trace correlation strategy (bulletproof — works with diagnostics ON or OFF):
+
+  INBOUND:
+    - Extract traceId and clientSpanId from the incoming traceparent (or seed new ones).
+    - Always generate a manual APIM span ID (manualApimSpanId) and explicitly set it
+      on the traceparent header sent to the backend.
+    - If APIM diagnostics are OFF: this manual header reaches the backend unchanged.
+    - If APIM diagnostics are ON: APIM's native W3C engine overwrites it with its own
+      span ID — that's fine, outbound captures the truth either way.
+
+  OUTBOUND:
+    - Read context.Request.Headers["traceparent"] — this is the exact header that was
+      sent to the backend (either our manual one or APIM's native one).
+    - Parse the span ID from it (finalApimSpanId) and use it in the Event Hub payload.
+    - This guarantees the logged Id matches the backend's parentId regardless of
+      whether diagnostics are enabled.
+
+  OTel Collector strategy:
+    The azure_event_hub receiver (format: "azure") natively parses Azure Application
+    Insights AppRequests records into OTel spans via a traces pipeline. The payload
+    is structured to match that schema:
+      OperationId → trace.id
+      Id          → span.id          (the actual span ID sent to the backend)
+      ParentId    → span.parentSpanId
+      Name        → span.name
+      AppRoleName → service.name (resource attribute, synthesized as entity in NR)
+      DurationMs  → end_time = start_time + DurationMs
+      ResultCode  → http.response.status_code
+      Url         → http.url
+      Properties["HTTP Method"] → http.method
+-->
+<policies>
+  <inbound>
+    <!-- CORS — must be first, before <base />, to handle preflight OPTIONS requests -->
+    <cors allow-credentials="false">
+      <allowed-origins>
+        <origin>*</origin>
+      </allowed-origins>
+      <allowed-methods>
+        <method>GET</method>
+        <method>OPTIONS</method>
+      </allowed-methods>
+      <allowed-headers>
+        <header>traceparent</header>
+        <header>tracestate</header>
+        <header>content-type</header>
+      </allowed-headers>
+    </cors>
+
+    <base />
+
+    <!-- Route to the demo mock-backend registered in Terraform -->
+    <set-backend-service backend-id="mock-backend" />
+
+    <!--
+      STEP 1: Extract traceId and clientSpanId from the inbound traceparent,
+      or seed new values if no traceparent was provided.
+    -->
+    <choose>
+      <when condition="@(context.Request.Headers.ContainsKey(&quot;traceparent&quot;))">
+        <set-variable name="inboundTraceparent" value="@(context.Request.Headers.GetValueOrDefault(&quot;traceparent&quot;, &quot;&quot;))" />
+        <set-variable name="traceId" value="@{
+          var tp = context.Variables.GetValueOrDefault&lt;string&gt;(&quot;inboundTraceparent&quot;, &quot;&quot;);
+          var parts = tp.Split('-');
+          return (parts.Length == 4) ? parts[1] : Guid.NewGuid().ToString(&quot;N&quot;);
+        }" />
+        <set-variable name="clientSpanId" value="@{
+          var tp = context.Variables.GetValueOrDefault&lt;string&gt;(&quot;inboundTraceparent&quot;, &quot;&quot;);
+          var parts = tp.Split('-');
+          return (parts.Length == 4) ? parts[2] : &quot;0000000000000000&quot;;
+        }" />
+        <set-variable name="traceFlags" value="@{
+          var tp = context.Variables.GetValueOrDefault&lt;string&gt;(&quot;inboundTraceparent&quot;, &quot;&quot;);
+          var parts = tp.Split('-');
+          return (parts.Length == 4) ? parts[3] : &quot;01&quot;;
+        }" />
+      </when>
+      <otherwise>
+        <set-variable name="traceId" value="@(Guid.NewGuid().ToString(&quot;N&quot;))" />
+        <set-variable name="clientSpanId" value="0000000000000000" />
+        <set-variable name="traceFlags" value="01" />
+      </otherwise>
+    </choose>
+
+    <!--
+      STEP 2: Always generate a manual APIM span ID and explicitly set the
+      traceparent header. If diagnostics are OFF this reaches the backend as-is.
+      If diagnostics are ON, APIM's native engine overwrites it — outbound captures
+      whichever span ID was actually sent.
+    -->
+    <set-variable name="manualApimSpanId" value="@{
+      var bytes = new byte[8];
+      new System.Random().NextBytes(bytes);
+      return BitConverter.ToString(bytes).Replace(&quot;-&quot;, &quot;&quot;).ToLower();
+    }" />
+    <set-header name="traceparent" exists-action="override">
+      <value>@(string.Format(&quot;00-{0}-{1}-{2}&quot;,
+        context.Variables.GetValueOrDefault&lt;string&gt;(&quot;traceId&quot;),
+        context.Variables.GetValueOrDefault&lt;string&gt;(&quot;manualApimSpanId&quot;),
+        context.Variables.GetValueOrDefault&lt;string&gt;(&quot;traceFlags&quot;)))</value>
+    </set-header>
+
+    <choose>
+      <when condition="@(context.Request.Headers.ContainsKey(&quot;tracestate&quot;))">
+        <set-header name="tracestate" exists-action="override">
+          <value>@(context.Request.Headers.GetValueOrDefault(&quot;tracestate&quot;, &quot;&quot;))</value>
+        </set-header>
+      </when>
+    </choose>
+
+  </inbound>
+
+  <backend>
+    <base />
+  </backend>
+
+  <outbound>
+    <base />
+
+    <!--
+      STEP 3: Capture the traceparent that was actually sent to the backend.
+      This is the source of truth — either our manual span ID (diagnostics OFF)
+      or APIM's natively-generated span ID (diagnostics ON).
+    -->
+    <set-variable name="finalApimSpanId" value="@{
+      var tp = context.Request.Headers.GetValueOrDefault(&quot;traceparent&quot;, &quot;&quot;);
+      var parts = tp.Split('-');
+      return (parts.Length == 4) ? parts[2] : context.Variables.GetValueOrDefault&lt;string&gt;(&quot;manualApimSpanId&quot;, &quot;0000000000000000&quot;);
+    }" />
+
+    <!--
+      STEP 4: Emit an Azure Application Insights AppRequests record to Event Hub.
+      The azure_event_hub receiver (format: "azure") maps this to a native OTel span
+      in the traces pipeline.
+    -->
+    <log-to-eventhub logger-id="apim-eventhub-logger" partition-id="0">
+      @{
+        var traceId      = context.Variables.GetValueOrDefault&lt;string&gt;(&quot;traceId&quot;, &quot;&quot;);
+        var clientSpanId = context.Variables.GetValueOrDefault&lt;string&gt;(&quot;clientSpanId&quot;, &quot;0000000000000000&quot;);
+        var finalSpanId  = context.Variables.GetValueOrDefault&lt;string&gt;(&quot;finalApimSpanId&quot;, &quot;&quot;);
+        var method       = context.Request.Method;
+        var url          = context.Request.Url.ToString();
+        var statusCode   = context.Response.StatusCode.ToString();
+        var durationMs   = context.Elapsed.TotalMilliseconds;
+        var timestamp    = DateTime.UtcNow.ToString(&quot;o&quot;);
+
+        var record = new JObject(
+          new JProperty(&quot;time&quot;,        timestamp),
+          new JProperty(&quot;resourceId&quot;,  context.Deployment.ServiceId),
+          new JProperty(&quot;Type&quot;,        &quot;AppRequests&quot;),
+          new JProperty(&quot;OperationId&quot;, traceId),
+          new JProperty(&quot;Id&quot;,          finalSpanId),
+          new JProperty(&quot;ParentId&quot;,    clientSpanId),
+          new JProperty(&quot;Name&quot;,        context.Operation.Name),
+          new JProperty(&quot;AppRoleName&quot;, &quot;apim-gateway&quot;),
+          new JProperty(&quot;DurationMs&quot;,  durationMs),
+          new JProperty(&quot;ResultCode&quot;,  statusCode),
+          new JProperty(&quot;Url&quot;,         url),
+          new JProperty(&quot;Properties&quot;,  new JObject(
+            new JProperty(&quot;HTTP Method&quot;, method)
+          ))
+        );
+        return new JObject(new JProperty(&quot;records&quot;, new JArray(record))).ToString();
+      }
+    </log-to-eventhub>
+
+  </outbound>
+
+  <on-error>
+    <base />
+  </on-error>
+</policies>
