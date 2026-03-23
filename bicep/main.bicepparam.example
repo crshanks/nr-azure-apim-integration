@@ -1,11 +1,13 @@
 // Copy this file to main.bicepparam and fill in the values.
 // Do NOT commit main.bicepparam to source control (it contains secrets).
 //
-// Deploy with:
+// Deploy with (from repo root):
+//   bicep build-params bicep/main.bicepparam --outfile /tmp/main-params.json
+//   bicep build bicep/main.bicep --outfile /tmp/main-arm.json
 //   az deployment group create \
 //     --resource-group <your-resource-group> \
-//     --template-file bicep/main.bicep \
-//     --parameters bicep/main.bicepparam
+//     --template-file /tmp/main-arm.json \
+//     --parameters @/tmp/main-params.json
 
 using './main.bicep'
 
@@ -18,9 +20,8 @@ param apimName                 = '<your-apim-instance-name>'
 param apimResourceGroupName    = '<resource-group-containing-apim>'
 param apimLoggerName           = 'apim-eventhub-logger'
 
-// Inject the license key via environment variable rather than committing it:
-//   export NEW_RELIC_LICENSE_KEY="your_40_char_key"
-param newRelicLicenseKey       = readEnvironmentVariable('NEW_RELIC_LICENSE_KEY')
+// Set your New Relic ingest license key (40 chars, ends in NRAL):
+param newRelicLicenseKey       = 'YOUR_40_CHAR_LICENSE_KEY_NRAL'
 
 // Optional overrides — remove to use auto-generated names:
 // param eventhubNamespaceNameOverride     = 'evhns-apim-telemetry-dev-weu'

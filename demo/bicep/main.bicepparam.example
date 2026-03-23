@@ -4,11 +4,13 @@
 // IMPORTANT: Deploy bicep/main.bicep BEFORE this.
 // apimLoggerName must match the apimLoggerName parameter used there.
 //
-// Deploy with:
+// Deploy with (from repo root):
+//   bicep build-params demo/bicep/main.bicepparam --outfile /tmp/demo-params.json
+//   bicep build demo/bicep/main.bicep --outfile /tmp/demo-arm.json
 //   az deployment group create \
 //     --resource-group <your-resource-group> \
-//     --template-file demo/bicep/main.bicep \
-//     --parameters demo/bicep/main.bicepparam
+//     --template-file /tmp/demo-arm.json \
+//     --parameters @/tmp/demo-params.json
 
 using './main.bicep'
 
@@ -26,6 +28,5 @@ param apimLoggerName        = 'apim-eventhub-logger'
 //   docker push <registry>/mock-backend:latest
 param mockBackendImage      = '<your-registry>/mock-backend:latest'
 
-// Inject the license key via environment variable rather than committing it:
-//   export NEW_RELIC_LICENSE_KEY="your_40_char_key"
-param newRelicLicenseKey    = readEnvironmentVariable('NEW_RELIC_LICENSE_KEY')
+// Set your New Relic ingest license key (40 chars, ends in NRAL):
+param newRelicLicenseKey    = 'YOUR_40_CHAR_LICENSE_KEY_NRAL'

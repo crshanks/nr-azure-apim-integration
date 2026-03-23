@@ -234,7 +234,7 @@ terraform apply
 
 ```bash
 cp bicep/main.bicepparam.example bicep/main.bicepparam
-# Edit bicep/main.bicepparam — set apimName, apimResourceGroupName, newRelicLicenseKey
+# Edit bicep/main.bicepparam — set apimName, apimResourceGroupName, and newRelicLicenseKey directly in the file
 
 bicep build-params bicep/main.bicepparam --outfile /tmp/main-params.json
 bicep build bicep/main.bicep --outfile /tmp/main-arm.json
@@ -255,7 +255,7 @@ Build and push the mock-backend image first (see [Option A Step 2](#step-2--demo
 
 ```bash
 cp demo/bicep/main.bicepparam.example demo/bicep/main.bicepparam
-# Edit demo/bicep/main.bicepparam — set mockBackendImage, apimName, apimResourceGroupName, newRelicLicenseKey
+# Edit demo/bicep/main.bicepparam — set mockBackendImage, apimName, apimResourceGroupName, and newRelicLicenseKey directly in the file
 
 bicep build-params demo/bicep/main.bicepparam --outfile /tmp/demo-params.json
 bicep build demo/bicep/main.bicep --outfile /tmp/demo-arm.json
