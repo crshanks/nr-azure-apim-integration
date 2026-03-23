@@ -234,24 +234,18 @@ terraform apply
 
 ```bash
 cp bicep/main.bicepparam.example bicep/main.bicepparam
-# Edit bicep/main.bicepparam — set apimName and apimResourceGroupName
-export NEW_RELIC_LICENSE_KEY="your_40_char_license_key"
+# Edit bicep/main.bicepparam — set apimName, apimResourceGroupName, newRelicLicenseKey
+
+bicep build-params bicep/main.bicepparam --outfile /tmp/main-params.json
+bicep build bicep/main.bicep --outfile /tmp/main-arm.json
 
 az deployment group create \
   --resource-group <your-resource-group> \
-  --template-file bicep/main.bicep \
-  --parameters bicep/main.bicepparam
+  --template-file /tmp/main-arm.json \
+  --parameters @/tmp/main-params.json
 ```
 
-> **Corporate SSL proxy:** If `az deployment group create` fails with an SSL certificate error when resolving the Bicep version, disable the version check and pre-compile to ARM JSON using the standalone `bicep` binary:
-> ```bash
-> az config set bicep.check_version=false
-> bicep build bicep/main.bicep --outfile /tmp/main-arm.json
-> az deployment group create \
->   --resource-group <your-resource-group> \
->   --template-file /tmp/main-arm.json \
->   --parameters bicep/main.bicepparam
-> ```
+> **Note:** The standalone `bicep` binary is used here to pre-compile the template and parameters to ARM JSON before deployment. This avoids SSL certificate errors that occur when the Azure CLI attempts to check the latest Bicep version against `downloads.bicep.azure.com` on networks with a corporate SSL proxy. Install it from [https://github.com/Azure/bicep/releases](https://github.com/Azure/bicep/releases) if not already present.
 
 > **Required permissions:** The deploying identity needs Contributor on both the telemetry pipeline resource group and the APIM resource group. The APIM resource group permission is needed because the APIM logger is created via a cross-RG nested deployment (`Microsoft.Resources/deployments/write`).
 
@@ -261,16 +255,16 @@ Build and push the mock-backend image first (see [Option A Step 2](#step-2--demo
 
 ```bash
 cp demo/bicep/main.bicepparam.example demo/bicep/main.bicepparam
-# Set mockBackendImage and other values
-export NEW_RELIC_LICENSE_KEY="your_40_char_license_key"
+# Edit demo/bicep/main.bicepparam — set mockBackendImage, apimName, apimResourceGroupName, newRelicLicenseKey
+
+bicep build-params demo/bicep/main.bicepparam --outfile /tmp/demo-params.json
+bicep build demo/bicep/main.bicep --outfile /tmp/demo-arm.json
 
 az deployment group create \
   --resource-group <your-resource-group> \
-  --template-file demo/bicep/main.bicep \
-  --parameters demo/bicep/main.bicepparam
+  --template-file /tmp/demo-arm.json \
+  --parameters @/tmp/demo-params.json
 ```
-
-> **Corporate SSL proxy:** Same workaround as Step 1 — `az config set bicep.check_version=false`, then pre-compile with `bicep build demo/bicep/main.bicep --outfile /tmp/demo-arm.json` and deploy the ARM JSON.
 
 ### Step 3 — Mock Client (`demo/docker-compose.yml`)
 
