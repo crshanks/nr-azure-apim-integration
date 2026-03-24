@@ -163,6 +163,89 @@ All three spans share the same `traceId` → New Relic links them into one distr
 >
 > If you adapt the APIM policy, preserve this outbound capture step. Reporting the span ID from the inbound policy is not sufficient when diagnostics are enabled.
 
+## Sampling
+
+The pipeline logs every APIM request to Event Hub by default. At scale you will want to reduce
+volume. Sampling can be applied at two layers with different cost/fidelity trade-offs.
+
+### Layer 1 — APIM policy (filter before Event Hub)
+
+Wrapping `<log-to-eventhub>` in a `<choose>` condition prevents Event Hub writes entirely for
+filtered requests — the most cost-effective option. Suitable for known low-value traffic:
+
+```xml
+<choose>
+  <when condition="@(
+    context.Request.Method == "OPTIONS" ||
+    context.Request.Url.Path.Contains("/health")
+  )">
+    <!-- skip logging -->
+  </when>
+  <otherwise>
+    <log-to-eventhub logger-id="{{APIM_LOGGER_ID}}" partition-id="0">
+      <!-- existing payload expression -->
+    </log-to-eventhub>
+  </otherwise>
+</choose>
+```
+
+Keep conditions simple — they execute on every request, including those that are not sampled.
+
+### Layer 2 — OTel Collector (filter before New Relic)
+
+Add a processor to `otel-collector-config.yaml`. This does not reduce Event Hub costs (messages
+are already consumed) but reduces New Relic ingest volume.
+
+**Probabilistic sampler** — simplest option, keeps a fixed percentage of all traces:
+
+```yaml
+processors:
+  probabilistic_sampler:
+    sampling_percentage: 10
+```
+
+**Tail sampling** — keeps 100% of errors and slow traces, samples the rest:
+
+```yaml
+processors:
+  tail_sampling:
+    decision_wait: 10s
+    policies:
+      - name: keep-errors
+        type: status_code
+        status_code: {status_codes: [ERROR]}
+      - name: keep-slow
+        type: latency
+        latency: {threshold_ms: 5000}
+      - name: probabilistic-rest
+        type: probabilistic
+        probabilistic: {sampling_percentage: 10}
+```
+
+Add the processor to the traces pipeline:
+
+```yaml
+service:
+  pipelines:
+    traces:
+      receivers: [azure_event_hub]
+      processors: [memory_limiter, tail_sampling, batch]
+      exporters: [otlphttp/newrelic]
+```
+
+Tail sampling buffers spans in memory during `decision_wait`. The default 1 GiB ACI allocation
+handles moderate throughput comfortably — increase `otelCollectorMemoryGb` in your
+Bicep/Terraform parameters for high-volume deployments.
+
+### Recommended hybrid strategy
+
+| Traffic type | APIM layer | Collector layer |
+|---|---|---|
+| Health checks, OPTIONS | Filter out — no Event Hub write | N/A |
+| Normal successful requests | Log all | Keep 10% (probabilistic) |
+| Error responses (4xx/5xx) | Log all | Keep 100% |
+| Slow requests (> 5 s) | Log all | Keep 100% |
+
 ## Prerequisites
 
 - Azure subscription with Contributor access on the target resource group (Bicep also requires Contributor on the APIM resource group — see [Required permissions](#option-b--bicep))
