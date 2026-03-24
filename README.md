@@ -1,5 +1,7 @@
 # Azure APIM → New Relic Distributed Trace Integration
 
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
 Event-driven OpenTelemetry pipeline that extracts distributed traces from Azure API Management (APIM) and forwards them to New Relic as native spans, producing a unified end-to-end trace across browser client, APIM gateway, and backend microservices.
 
 ## Architecture
@@ -150,6 +152,16 @@ W3C `traceparent` format: `00-{traceId(32 hex)}-{spanId(16 hex)}-{flags}`
 5. **Backend** receives `traceparent: 00-<traceId>-<finalApimSpanId>-01`. Its OTel SDK creates a child span parented under `finalApimSpanId`.
 
 All three spans share the same `traceId` → New Relic links them into one distributed trace.
+
+> **Important: APIM diagnostics can silently overwrite the span ID**
+>
+> When Azure API Management diagnostics are enabled (e.g. Application Insights integration, built-in logging), APIM's native W3C trace context engine intercepts the outbound request and **replaces the `traceparent` header with its own generated span ID** — overwriting the `manualApimSpanId` set by the inbound policy.
+>
+> If your APIM policy reports `manualApimSpanId` to Event Hubs but the backend receives a *different* span ID (the one APIM's diagnostics engine generated), the backend span will be parented under an ID that was never reported to New Relic. The result is a **broken distributed trace** — New Relic receives three spans that share a `traceId` but cannot be linked into a single trace.
+>
+> The policy in this repo handles both cases correctly by reading `context.Request.Headers["traceparent"]` in the **outbound** policy — after any diagnostics engine rewriting has occurred — to capture the `finalApimSpanId` that was actually sent to the backend. This value is what gets reported to Event Hubs, ensuring the APIM span and backend span are always correctly linked.
+>
+> If you adapt the APIM policy, preserve this outbound capture step. Reporting the span ID from the inbound policy is not sufficient when diagnostics are enabled.
 
 ## Prerequisites
 
@@ -452,4 +464,8 @@ The variable accepts any valid storage account name (3–24 lowercase alphanumer
 **Known limitation — Event Hub network rule sets:**
 
 The `azurerm_eventhub_namespace` resource includes `lifecycle { ignore_changes = [network_rulesets] }`. The azurerm provider (≥ 3.x) attempts to read `networkRuleSets` on every plan/apply, which requires a permission typically not granted in governed subscriptions. This ignore causes no loss of fidelity as this Terraform does not manage network rules.
+
+---
+
+Licensed under the [Apache License 2.0](LICENSE).
 
