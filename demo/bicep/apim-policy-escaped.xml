@@ -135,6 +135,29 @@
     }" />
 
     <!--
+      SAMPLING (optional) — filter before Event Hub to reduce ingestion costs entirely.
+      This is the most cost-effective sampling point: filtered requests never reach
+      Event Hub or New Relic. Keep conditions simple — they execute on every request.
+
+      To enable: wrap the <log-to-eventhub> below in a <choose><otherwise> block,
+      placing your filter condition in the <when> clause. Example:
+
+      <choose>
+        <when condition="@(
+          context.Request.Method == &quot;OPTIONS&quot; ||
+          context.Request.Url.Path.Contains(&quot;/health&quot;)
+        )">
+          (skip — do not log to Event Hub)
+        </when>
+        <otherwise>
+          <log-to-eventhub ...> ... </log-to-eventhub>
+        </otherwise>
+      </choose>
+
+      See the README Sampling section for a full hybrid sampling strategy.
+    -->
+
+    <!--
       STEP 4: Emit an Azure Application Insights AppRequests record to Event Hub.
       The azure_event_hub receiver (format: "azure") maps this to a native OTel span
       in the traces pipeline.

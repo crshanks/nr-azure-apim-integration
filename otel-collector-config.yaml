@@ -38,6 +38,37 @@ processors:
     send_batch_size: 1000
     timeout: 10s
 
+  # ── Sampling processors (optional) ────────────────────────────────────────
+  # Uncomment ONE of the following to reduce New Relic ingest volume.
+  # Note: these processors act after Event Hub consumption — they do not reduce
+  # Event Hub ingestion costs. For Event Hub cost reduction, filter at the APIM
+  # policy layer instead (see apim-policy.xml.tpl SAMPLING comment and README).
+  #
+  # If enabling either sampler, add it to the traces pipeline processors list
+  # between memory_limiter and batch:
+  #   processors: [memory_limiter, probabilistic_sampler, batch]
+  #   processors: [memory_limiter, tail_sampling, batch]
+
+  # Option A — Probabilistic sampler: keep a fixed percentage of all traces.
+  # probabilistic_sampler:
+  #   sampling_percentage: 10   # keep 10% of traces
+
+  # Option B — Tail sampling: keep 100% of errors and slow traces, sample the rest.
+  # Buffers spans in memory during decision_wait — for high-volume deployments,
+  # increase otelCollectorMemoryGb in your Bicep/Terraform parameters.
+  # tail_sampling:
+  #   decision_wait: 10s
+  #   policies:
+  #     - name: keep-errors
+  #       type: status_code
+  #       status_code: {status_codes: [ERROR]}
+  #     - name: keep-slow
+  #       type: latency
+  #       latency: {threshold_ms: 5000}
+  #     - name: probabilistic-rest
+  #       type: probabilistic
+  #       probabilistic: {sampling_percentage: 10}
+
 exporters:
   # debug exporter — uncomment for local troubleshooting, do not enable in production
   # debug:

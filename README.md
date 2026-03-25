@@ -171,7 +171,8 @@ volume. Sampling can be applied at two layers with different cost/fidelity trade
 ### Layer 1 — APIM policy (filter before Event Hub)
 
 Wrapping `<log-to-eventhub>` in a `<choose>` condition prevents Event Hub writes entirely for
-filtered requests — the most cost-effective option. Suitable for known low-value traffic:
+filtered requests — the most cost-effective option. Suitable for known low-value traffic.
+A commented-out example is included in [apim-policy.xml.tpl](apim-policy.xml.tpl).
 
 ```xml
 <choose>
@@ -194,7 +195,8 @@ Keep conditions simple — they execute on every request, including those that a
 ### Layer 2 — OTel Collector (filter before New Relic)
 
 Add a processor to `otel-collector-config.yaml`. This does not reduce Event Hub costs (messages
-are already consumed) but reduces New Relic ingest volume.
+are already consumed) but reduces New Relic ingest volume. Commented-out examples for both
+options below are included in [otel-collector-config.yaml](otel-collector-config.yaml).
 
 **Probabilistic sampler** — simplest option, keeps a fixed percentage of all traces:
 
