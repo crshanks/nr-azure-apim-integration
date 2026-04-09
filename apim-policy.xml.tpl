@@ -181,7 +181,7 @@
           new JProperty("Id",          finalSpanId),
           new JProperty("ParentId",    clientSpanId),
           new JProperty("Name",        context.Operation.Name),
-          new JProperty("AppRoleName", "apim-gateway"),
+          new JProperty("AppRoleName", context.Api.Name),
           new JProperty("DurationMs",  durationMs),
           new JProperty("ResultCode",  statusCode),
           new JProperty("Url",         url),
