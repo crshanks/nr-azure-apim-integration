@@ -58,6 +58,7 @@ assert_contains "HTTP Method property"     '"HTTP Method",'
 
 # ── 3. Outbound traceparent capture ──────────────────────────────────────────
 assert_contains "Outbound traceparent read" 'context.Request.Headers.GetValueOrDefault("traceparent"'
+assert_contains "finalTraceId variable"     'finalTraceId'
 assert_contains "finalApimSpanId variable"  'finalApimSpanId'
 
 # ── 4. Template variables present (not hardcoded) ────────────────────────────

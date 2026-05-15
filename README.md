@@ -146,22 +146,22 @@ Enable **Diagnostic Settings** on your APIM instance to export `GatewayLogs`. Tw
 W3C `traceparent` format: `00-{traceId(32 hex)}-{spanId(16 hex)}-{flags}`
 
 1. **Browser** generates `traceId` and `rootSpanId`, sends request to APIM with `traceparent: 00-<traceId>-<rootSpanId>-01`.
-2. **APIM inbound** extracts `traceId` and `rootSpanId`, generates `manualApimSpanId`, sets `traceparent: 00-<traceId>-<manualApimSpanId>-01`. If APIM diagnostics are enabled, the native W3C engine may overwrite this with its own span ID — both cases are handled.
-3. **APIM outbound** reads `context.Request.Headers["traceparent"]` to capture the *actual* span ID sent to the backend (`finalApimSpanId`), then emits an Application Insights `AppRequests` JSON record to Event Hubs containing `traceId`, `finalApimSpanId`, and `rootSpanId` as parent.
+2. **APIM inbound** extracts `traceId` and `rootSpanId`, generates `manualApimSpanId`, sets `traceparent: 00-<traceId>-<manualApimSpanId>-01`. If APIM diagnostics are enabled, the native W3C engine may overwrite both the trace ID and span ID — both cases are handled.
+3. **APIM outbound** reads `context.Request.Headers["traceparent"]` to capture the *actual* trace ID and span ID sent to the backend (`finalTraceId`, `finalApimSpanId`), then emits an Application Insights `AppRequests` JSON record to Event Hubs containing `finalTraceId`, `finalApimSpanId`, and `rootSpanId` as parent.
 4. **OTel Collector** receives the record via the `azure_event_hub` receiver, which natively maps `AppRequests` fields to OTel span fields and exports a native span to New Relic.
-5. **Backend** receives `traceparent: 00-<traceId>-<finalApimSpanId>-01`. Its OTel SDK creates a child span parented under `finalApimSpanId`.
+5. **Backend** receives `traceparent: 00-<finalTraceId>-<finalApimSpanId>-01`. Its OTel SDK creates a child span parented under `finalApimSpanId`.
 
-All three spans share the same `traceId` → New Relic links them into one distributed trace.
+All three spans share the same trace ID → New Relic links them into one distributed trace.
 
-> **Important: APIM diagnostics can silently overwrite the span ID**
+> **Important: APIM diagnostics can silently overwrite the `traceparent` header**
 >
-> When Azure API Management diagnostics are enabled (e.g. Application Insights integration, built-in logging), APIM's native W3C trace context engine intercepts the outbound request and **replaces the `traceparent` header with its own generated span ID** — overwriting the `manualApimSpanId` set by the inbound policy.
+> When Azure API Management diagnostics are enabled (e.g. Application Insights integration, built-in logging), APIM's native W3C trace context engine intercepts the outbound request and **rewrites the `traceparent` header** — both the trace ID and the span ID can be replaced with values APIM's engine generates internally.
 >
-> If your APIM policy reports `manualApimSpanId` to Event Hubs but the backend receives a *different* span ID (the one APIM's diagnostics engine generated), the backend span will be parented under an ID that was never reported to New Relic. The result is a **broken distributed trace** — New Relic receives three spans that share a `traceId` but cannot be linked into a single trace.
+> If your APIM policy reports the `traceId` and span ID it captured in **inbound**, but the backend receives a *different* `traceparent` (rewritten by diagnostics), the backend span will use a trace ID that was never reported to New Relic. The result is a **broken distributed trace** — New Relic receives the APIM span and backend span as separate, unlinked traces.
 >
-> The policy in this repo handles both cases correctly by reading `context.Request.Headers["traceparent"]` in the **outbound** policy — after any diagnostics engine rewriting has occurred — to capture the `finalApimSpanId` that was actually sent to the backend. This value is what gets reported to Event Hubs, ensuring the APIM span and backend span are always correctly linked.
+> The policy in this repo handles this correctly by reading `context.Request.Headers["traceparent"]` in the **outbound** policy — after any diagnostics engine rewriting has occurred — to capture both `finalTraceId` and `finalApimSpanId` from the live header. These values are what get reported to Event Hubs, ensuring APIM and backend spans are always correctly linked regardless of whether diagnostics are enabled.
 >
-> If you adapt the APIM policy, preserve this outbound capture step. Reporting the span ID from the inbound policy is not sufficient when diagnostics are enabled.
+> If you adapt the APIM policy, preserve this outbound capture step for **both** the trace ID and the span ID. Reporting either from the inbound policy is not sufficient when diagnostics are enabled.
 
 ## Sampling
 

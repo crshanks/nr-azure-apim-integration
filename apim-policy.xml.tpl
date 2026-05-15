@@ -17,9 +17,12 @@
   OUTBOUND:
     - Read context.Request.Headers["traceparent"] — this is the exact header that was
       sent to the backend (either our manual one or APIM's native one).
-    - Parse the span ID from it (finalApimSpanId) and use it in the Event Hub payload.
-    - This guarantees the logged Id matches the backend's parentId regardless of
-      whether diagnostics are enabled.
+    - Parse BOTH trace ID (finalTraceId) and span ID (finalApimSpanId) from it and
+      use them in the Event Hub payload. APIM's Application Insights diagnostics
+      can rewrite either or both, so we always re-read the live header rather than
+      trusting the inbound-captured values.
+    - This guarantees the logged OperationId/Id match what the backend actually saw,
+      regardless of whether diagnostics are enabled.
 
   OTel Collector strategy:
     The azure_event_hub receiver (format: "azure") natively parses Azure Application
@@ -125,9 +128,15 @@
 
     <!--
       STEP 3: Capture the traceparent that was actually sent to the backend.
-      This is the source of truth — either our manual span ID (diagnostics OFF)
-      or APIM's natively-generated span ID (diagnostics ON).
+      This is the source of truth — APIM diagnostics (Application Insights logger)
+      can rewrite both the trace ID and span ID portions, so we re-read both from
+      the live header rather than relying on the inbound-captured values.
     -->
+    <set-variable name="finalTraceId" value="@{
+      var tp = context.Request.Headers.GetValueOrDefault("traceparent", "");
+      var parts = tp.Split('-');
+      return (parts.Length == 4) ? parts[1] : context.Variables.GetValueOrDefault<string>("traceId", "");
+    }" />
     <set-variable name="finalApimSpanId" value="@{
       var tp = context.Request.Headers.GetValueOrDefault("traceparent", "");
       var parts = tp.Split('-');
@@ -164,7 +173,7 @@
     -->
     <log-to-eventhub logger-id="${logger_id}" partition-id="0">
       @{
-        var traceId      = context.Variables.GetValueOrDefault<string>("traceId", "");
+        var finalTraceId = context.Variables.GetValueOrDefault<string>("finalTraceId", "");
         var clientSpanId = context.Variables.GetValueOrDefault<string>("clientSpanId", "0000000000000000");
         var finalSpanId  = context.Variables.GetValueOrDefault<string>("finalApimSpanId", "");
         var method       = context.Request.Method;
@@ -177,7 +186,7 @@
           new JProperty("time",        timestamp),
           new JProperty("resourceId",  context.Deployment.ServiceId),
           new JProperty("Type",        "AppRequests"),
-          new JProperty("OperationId", traceId),
+          new JProperty("OperationId", finalTraceId),
           new JProperty("Id",          finalSpanId),
           new JProperty("ParentId",    clientSpanId),
           new JProperty("Name",        context.Operation.Name),
