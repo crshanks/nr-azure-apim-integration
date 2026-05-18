@@ -52,6 +52,9 @@ param otelCollectorCpu string = '0.5'
 @description('Memory (GB) allocated to the OTel Collector container.')
 param otelCollectorMemoryGb string = '1.0'
 
+@description('When true, the OTel Collector also generates span-derived RED metrics (Rate, Errors, Duration) and sends them to New Relic. This populates the Throughput / Response Time / Error Rate columns of the New Relic APM UI for each APIM API entity. Default false — leave disabled if you collect APIM metrics through the New Relic Azure Monitor integration or another path. Adds modest ingest cost (one metric data point per service+span+method+status per minute).')
+param enableSpanMetrics bool = false
+
 @description('Override auto-generated Event Hub namespace name.')
 param eventhubNamespaceNameOverride string = ''
 
@@ -112,8 +115,14 @@ var eventHubsDataSenderRoleId   = '2b629674-e913-4c01-ae53-ef4638d8f975'
 var eventHubsDataReceiverRoleId = 'a638d3c7-ab3a-418d-83e6-5f17a39d4fde'
 
 // ── OTel Collector config (read from file at compile time) ───────────────────
+// Two configs are shipped: a default (traces only) and a span-metrics variant
+// that adds a spanmetrics connector + transform/spanstatus processor. The
+// `enableSpanMetrics` parameter selects which one is embedded into the ACI's
+// OTEL_CONFIG_YAML env var. Both files are validated by `make test-collector`.
 
-var otelConfigYaml = loadTextContent('../otel-collector-config.yaml')
+var otelConfigYaml = enableSpanMetrics
+  ? loadTextContent('../otel-collector-config.span-derived-metrics.yaml')
+  : loadTextContent('../otel-collector-config.yaml')
 
 // ── Event Hub Namespace ──────────────────────────────────────────────────────
 

@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # tests/collector/validate.sh
 #
-# Validates otel-collector-config.yaml using the otelcol-contrib Docker image.
-# Runs entirely locally — no Azure credentials required.
+# Validates the OTel Collector config files using the otelcol-contrib Docker
+# image. Runs entirely locally — no Azure credentials required.
+#
+# Validates:
+#   - otel-collector-config.yaml                      (default, traces only)
+#   - otel-collector-config.span-derived-metrics.yaml (opt-in, traces + span-derived metrics)
 #
 # Usage:
 #   ./tests/collector/validate.sh
@@ -11,7 +15,6 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-CONFIG="$REPO_ROOT/otel-collector-config.yaml"
 
 # Extract the image version from variables.tf unless overridden
 if [[ $# -ge 1 ]]; then
@@ -24,24 +27,30 @@ fi
 
 IMAGE="otel/opentelemetry-collector-contrib:${VERSION}"
 
-echo "==> Validating otel-collector-config.yaml with ${IMAGE}"
+validate_config() {
+  local config="$1"
+  echo "==> Validating $(basename "$config") with ${IMAGE}"
 
-# Substitute env var placeholders with dummy values so the validator
-# doesn't reject them as missing — we're testing structure, not secrets.
-PATCHED=$(sed \
-  -e 's|\${env:AZURE_EVENTHUB_CONNECTION}|Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=k;SharedAccessKey=dGVzdA==;EntityPath=test|g' \
-  -e 's|\${env:NEW_RELIC_LICENSE_KEY}|aaaabbbbccccddddeeeeffffaaaabbbbccccdddd|g' \
-  "$CONFIG")
+  # Substitute env var placeholders with dummy values so the validator
+  # doesn't reject them as missing — we're testing structure, not secrets.
+  PATCHED=$(sed \
+    -e 's|\${env:AZURE_EVENTHUB_CONNECTION}|Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=k;SharedAccessKey=dGVzdA==;EntityPath=test|g' \
+    -e 's|\${env:NEW_RELIC_LICENSE_KEY}|aaaabbbbccccddddeeeeffffaaaabbbbccccdddd|g' \
+    "$config")
 
-TMPFILE=$(mktemp)
-echo "$PATCHED" > "$TMPFILE"
+  TMPFILE=$(mktemp)
+  echo "$PATCHED" > "$TMPFILE"
 
-docker run --rm \
-  -v "$TMPFILE:/otel-config.yaml:ro" \
-  --entrypoint /otelcol-contrib \
-  "$IMAGE" \
-  validate --config "file:/otel-config.yaml"
+  docker run --rm \
+    -v "$TMPFILE:/otel-config.yaml:ro" \
+    --entrypoint /otelcol-contrib \
+    "$IMAGE" \
+    validate --config "file:/otel-config.yaml"
 
-rm -f "$TMPFILE"
+  rm -f "$TMPFILE"
 
-echo "==> otel-collector-config.yaml is valid"
+  echo "==> $(basename "$config") is valid"
+}
+
+validate_config "$REPO_ROOT/otel-collector-config.yaml"
+validate_config "$REPO_ROOT/otel-collector-config.span-derived-metrics.yaml"

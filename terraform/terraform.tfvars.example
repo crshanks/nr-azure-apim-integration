@@ -28,3 +28,7 @@ new_relic_license_key    = "REPLACE_ME"
 # otel_collector_cpu       = 0.5   # cores
 # otel_collector_memory_gb = 1.0   # GB
 # eventhub_partition_count = 2     # cannot be decreased after creation
+
+# Optional — enable span-derived RED metrics (Throughput / Error Rate / Response Time)
+# in the New Relic APM UI for each APIM API entity. Default false. See README §Span metrics.
+# enable_span_metrics      = true
