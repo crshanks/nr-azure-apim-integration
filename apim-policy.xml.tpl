@@ -180,7 +180,12 @@
         var url          = context.Request.Url.ToString();
         var statusCode   = context.Response.StatusCode.ToString();
         var durationMs   = context.Elapsed.TotalMilliseconds;
-        var timestamp    = DateTime.UtcNow.ToString("o");
+        // The azure_event_hub receiver maps `time` directly to span start_time
+        // and computes end_time = start_time + DurationMs. We are running this
+        // in <outbound> (request end), so subtract durationMs to anchor the
+        // span at the request's actual start moment — otherwise the APIM span
+        // renders to the right of (after) the backend span on the trace timeline.
+        var timestamp    = DateTime.UtcNow.AddMilliseconds(-durationMs).ToString("o");
 
         var record = new JObject(
           new JProperty("time",        timestamp),
