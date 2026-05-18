@@ -96,7 +96,8 @@ Enable **Diagnostic Settings** on your APIM instance to export `GatewayLogs`. Tw
 ```
 .
 ├── apim-policy.xml.tpl          # APIM policy template (rendered by demo/terraform/)
-├── otel-collector-config.yaml   # OTel Collector config (injected as env var by terraform/)
+├── otel-collector-config.yaml             # OTel Collector config — default (traces only)
+├── otel-collector-config.span-derived-metrics.yaml # OTel Collector config — opt-in variant: traces + signal_to_metrics → http.server.request.duration
 ├── architecture.md              # Mermaid diagram + component breakdown
 │
 ├── scripts/
@@ -247,6 +248,34 @@ Bicep/Terraform parameters for high-volume deployments.
 | Normal successful requests | Log all | Keep 10% (probabilistic) |
 | Error responses (4xx/5xx) | Log all | Keep 100% |
 | Slow requests (> 5 s) | Log all | Keep 100% |
+
+## Span metrics (optional)
+
+By default this pipeline exports **traces only** to New Relic. The APIM API entities appear correctly in the Distributed Tracing view, but the New Relic APM list view's **Throughput**, **Response Time**, and **Error Rate** columns show dashes — those columns are populated from OTel HTTP semantic-convention metrics (`http.server.request.duration`), not from raw spans.
+
+Enable the `enableSpanMetrics` parameter (Bicep) or `enable_span_metrics = true` (Terraform) to deploy a collector configuration that also generates these metrics from the APIM spans. The opt-in deploys [otel-collector-config.span-derived-metrics.yaml](otel-collector-config.span-derived-metrics.yaml) instead of [otel-collector-config.yaml](otel-collector-config.yaml); both files are validated by `make test-collector`.
+
+**What changes when enabled:**
+
+- **`transform/spanstatus` processor** — derives the OTel span status from `http.response.status_code` (HTTP ≥ 400 → `ERROR`). The `azure_event_hub` receiver maps APIM's `ResultCode` to the HTTP attribute but leaves span status unset, so without this step error rate would always be zero.
+- **`transform/semconv` processor** — renames the receiver-emitted `http.method` attribute to the OTel semantic-convention name `http.request.method`, so dimensions are consistent with metrics from APM-agent-instrumented backends.
+- **`signal_to_metrics` connector** — emits the OTel histogram `http.server.request.duration` (in seconds) directly from APIM spans, with `http.request.method` and `http.response.status_code` as dimensions. New Relic's APM UI consumes this exact metric name as the source of golden signals for OTel-instrumented services.
+- **Second pipeline (`metrics/span_derived`)** — receives the connector's output and exports it to New Relic via the same OTLP/HTTP exporter as the traces pipeline.
+
+**When to leave it off (the default):**
+
+- You already collect APIM platform metrics via the [New Relic Azure Monitor integration](https://docs.newrelic.com/docs/infrastructure/microsoft-azure-integrations/azure-integrations-list/azure-api-management-monitoring-integration/) — those metrics feed the APM list view from a different source.
+- You're cost-sensitive and don't need the APM golden metrics for the APIM entities specifically.
+
+**Cost impact:**
+
+Modest — one metric data point per minute per unique combination of `service.name × http.request.method × http.response.status_code`. For most APIs this is a small number of timeseries. Far cheaper than adding more spans, but non-zero.
+
+**Limitations:**
+
+- Dimensions are limited to what the APIM policy logs. No `db.system`, `peer.service`, custom headers, or other rich dimensions — RED golden signals work; deep slicing does not.
+- Spans emitted by the receiver are kind `SERVER` after our default config. New Relic's APM UI treats SERVER-kind spans as inbound throughput.
+- APIM doesn't log retries separately, so retried calls are indistinguishable from first attempts in the metrics.
 
 ## Prerequisites
 

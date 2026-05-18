@@ -152,7 +152,10 @@ resource "azurerm_container_group" "otel_collector" {
       # The EntityPath suffix scopes the connection to this specific Event Hub.
       AZURE_EVENTHUB_CONNECTION = "${azurerm_eventhub_namespace.main.default_primary_connection_string};EntityPath=${azurerm_eventhub.apim_telemetry.name}"
       # Full YAML config passed via env var — consumed by the env: config provider.
-      OTEL_CONFIG_YAML          = file("${path.module}/../otel-collector-config.yaml")
+      # The span-metrics variant adds a spanmetrics connector + transform/spanstatus
+      # processor; the default ships traces only. Both configs are validated by
+      # `make test-collector`.
+      OTEL_CONFIG_YAML          = var.enable_span_metrics ? file("${path.module}/../otel-collector-config.span-derived-metrics.yaml") : file("${path.module}/../otel-collector-config.yaml")
     }
 
     # env: config provider reads the YAML directly from the OTEL_CONFIG_YAML env var.

@@ -32,3 +32,7 @@ param newRelicLicenseKey       = 'YOUR_40_CHAR_LICENSE_KEY_NRAL'
 // Optional production sizing overrides:
 // param otelCollectorCpu      = '0.5'   // increase for higher throughput
 // param otelCollectorMemoryGb = '1.0'
+
+// Optional — enable span-derived RED metrics (Throughput / Error Rate / Response Time)
+// in the New Relic APM UI for each APIM API entity. Default false. See README §Span metrics.
+// param enableSpanMetrics     = true

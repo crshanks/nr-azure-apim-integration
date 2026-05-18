@@ -95,6 +95,12 @@ variable "otel_collector_memory_gb" {
   default     = 1.0
 }
 
+variable "enable_span_metrics" {
+  description = "When true, the OTel Collector also generates span-derived RED metrics (Rate, Errors, Duration) and sends them to New Relic. This populates the Throughput / Response Time / Error Rate columns of the New Relic APM UI for each APIM API entity. Default false — leave disabled if you collect APIM metrics through the New Relic Azure Monitor integration or another path. Adds modest ingest cost (one metric data point per service+span+method+status per minute)."
+  type        = bool
+  default     = false
+}
+
 variable "new_relic_license_key" {
   description = "New Relic ingest license key (injected as a secret)"
   type        = string
